@@ -36,3 +36,22 @@ def main(argv = sys.argv[1:]) :
         case "tag"          : cmd_tag(args)
         case _              : print("Bad command.")
 
+class GitRepository(object) :
+    worktree = None
+    gitdir = None
+    conf = None
+
+    def __init__(self, path, force = False):
+        worktree = path
+        gitdir = os.path.join(path,'.git')
+
+        if not (force or os.path.isdir(self.gitdir)) :
+            raise Exception(f"Not a git repository {path}")
+        
+
+
+
+def repo_path(repo, *path):
+    """Compute path under repo's gitdir."""
+    return os.path.join(repo.gitdir, *path)
+
