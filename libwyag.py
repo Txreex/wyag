@@ -51,6 +51,20 @@ class GitRepository(object) :
         if not (force or os.path.isdir(self.gitdir)) :
             raise Exception(f"Not a git repository {path}")
         
+        # ---- Read config file in .git/config ----
+        self.conf = configparser.ConfigParser()
+        cf = repo_file(self,"config")
+
+        if cf and os.path.exists(cf) :
+            self.conf.read([cf])
+        elif not force :
+            raise Exception("Configuration file missing")
+    
+        if not force:
+            vers = int(self.conf.get("core", "repositoryformatversion"))
+            if vers != 0:
+                raise Exception("Unsupported repositoryformatversion: {vers}")
+        # -----------------------------------------
 # --------------------------------------------------------------------------------#
         
 
@@ -80,6 +94,6 @@ def repo_file(repo, *path, mkdir = False ) :
     """Same as repo_path, but ensures the directory leading to the file exists.
     If not, creates it if mkdir=True. Returns the full path to the file."""
     if repo_dir(repo , *path[:-1] , mkdir = mkdir) :
-        return path
+        return repo_path(repo,path)
             
 # --------------------------------------------------------------------------------#
