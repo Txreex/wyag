@@ -36,38 +36,50 @@ def main(argv = sys.argv[1:]) :
         case "tag"          : cmd_tag(args)
         case _              : print("Bad command.")
 
+
+# ------------------------ Git Repo Object --------------------------------------#
+
 class GitRepository(object) :
     worktree = None
     gitdir = None
     conf = None
 
     def __init__(self, path, force = False):
-        worktree = path
-        gitdir = os.path.join(path,'.git')
+        self.worktree = path
+        self.gitdir = os.path.join(path,'.git')
 
         if not (force or os.path.isdir(self.gitdir)) :
             raise Exception(f"Not a git repository {path}")
         
+# --------------------------------------------------------------------------------#
+        
 
+# ------------------------ Repo Path functions -----------------------------------#
 
-
-def repo_path(repo, *path):
-    """Compute path under repo's gitdir."""
-    return os.path.join(repo.gitdir, *path)
+def repo_path(repo,*path) : # Only computes the path
+    """Computes the path under the repo""" #only checks
+    return os.join(repo.gitdir,*path)
 
 def repo_dir(repo, *path, mkdir=False):
-    """Same as repo_path, but mkdir *path if absent if mkdir."""
-
+    """Like repo_path, but ensures the directory exists (creates if needed)"""
     path = repo_path(repo, *path)
 
     if os.path.exists(path):
-        if (os.path.isdir(path)):
+        if os.path.isdir(path):
             return path
         else:
-            raise Exception(f"Not a directory {path}")
+            raise Exception(f"Not a directory: {path}")
 
     if mkdir:
         os.makedirs(path)
         return path
     else:
         return None
+    
+def repo_file(repo, *path, mkdir = False ) :
+    """Same as repo_path, but ensures the directory leading to the file exists.
+    If not, creates it if mkdir=True. Returns the full path to the file."""
+    if repo_dir(repo , *path[:-1] , mkdir = mkdir) :
+        return path
+            
+# --------------------------------------------------------------------------------#
