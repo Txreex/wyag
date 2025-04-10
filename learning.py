@@ -17,3 +17,6 @@ if args.command == "commit"  :
     print(f"Commiting the files with message : {args.message}")
 if args.command == "init" :
     print(f"Initializing repository...")
+
+
+#int dahkjhshgcvdajk hsgyuiaunhv fgybdhwghafgidonshgajdkjshajidhs
