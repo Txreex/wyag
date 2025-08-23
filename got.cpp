@@ -150,12 +150,12 @@ void print_tree(Tree* tree, string indent = ""){
     for(TreeEntry* entry : tree->entries){
         Blob* blob = dynamic_cast<Blob*>(entry->hash);
         if(blob){   // The hash is blob*
-            cout<<indent<<entry->name<<"(Blob)"<<endl;
+            cout<<indent<<entry->name<<" : "<<entry->sha<<endl;
         }else{
             Tree* t = dynamic_cast<Tree*>(entry->hash);
             if(t){  // the has is a tree
-                cout<<indent<<entry->name<<"/"<<" (Tree)"<<endl;
-                print_tree(t , indent + "   ");
+                cout<<indent<<entry->name<<"/"<<" : "<<entry->sha<<endl;
+                print_tree(t , indent + "       ");
             }else{
                 cout<<"Unknown type";
             }
