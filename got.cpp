@@ -14,8 +14,15 @@ namespace fs = std::filesystem;
 
 
 // ---------------------------FORWARD DECLARATIONS----------------------------------
-void create_structure(class GitRepository *repo);
+class GitRepository;
+void create_structure(GitRepository *repo);
 string make_blob_content(fs::path);
+string make_tree_content(fs::path);
+class Object;
+class Blob;
+class TreeEntry;
+class Tree;
+Tree* build_tree(fs::path);
 void create_file(fs::path, string content = "");
 // ---------------------------------------------------------------------------------
 
@@ -118,9 +125,11 @@ class TreeEntry{
 public :
     int mode;
     string name;
+    string sha;
     Object* hash;
 
-    TreeEntry(int mode , string name , Object* hash){
+    TreeEntry(int mode , string name , Object* hash , string sha = ""){
+        this->sha = sha;
         (*this).mode = mode;
         (*this).name = name;
         this->hash = hash;
@@ -131,8 +140,8 @@ class Tree : public Object{
 public :
     vector<TreeEntry*> entries;
 
-    void add_entries(int mode , string name , Object* hash){
-        TreeEntry* new_entry = new TreeEntry(mode, name, hash);
+    void add_entries(int mode , string name , Object* hash , string sha){
+        TreeEntry* new_entry = new TreeEntry(mode, name, hash , sha);
         entries.push_back(new_entry);
     }
 };
@@ -175,6 +184,12 @@ public:
             create_structure(this);
         }
     }
+
+    void add(fs::path p) {
+        if(fs::is_regular_file(p)){
+            //
+        }
+    }
 };
 
 // ---------------------------------------------------------------------------------
@@ -197,11 +212,10 @@ int main(int argc , char** argv){
     // }else{
     //     cout<<"No command given";
     // }
-    fs::path file_path = "file.txt";
-    string content = make_blob_content(file_path);
-    string file_hash = sha1(content);
-    cout<<"hash : "<<file_hash<<endl;
-    cout<<"content : "<<content<<endl;
+    Tree* cur_tree = build_tree(fs::current_path());
+    print_tree(cur_tree);
+
+    return 0;
 }
 // ---------------------------------------------------------------------------------
 
@@ -232,6 +246,60 @@ string make_blob_content(fs::path p){
     string blob_content = "blob " + to_string(file_content.size()) + "\\0" + file_content;  
 
     return blob_content;
+}
+
+string make_tree_content(fs::path dir_path) {
+    if(!fs::is_directory(dir_path)) {
+        throw runtime_error(dir_path.string() + " is not a directory");
+    }
+
+    string tree_content;
+
+    // Iterate over immediate children only
+    for(const auto& entry : fs::directory_iterator(dir_path)) {
+        string name = entry.path().filename().string();
+        string entry_content;
+        int mode;
+
+        if(entry.is_regular_file()) {
+            mode = 100644;
+            entry_content = make_blob_content(entry.path());
+        } else if(entry.is_directory()) {
+            mode = 40000;
+            entry_content = make_tree_content(entry.path()); // recursive call
+        } else {
+            continue; // skip symlinks, etc.
+        }
+
+        string hash = sha1(entry_content);
+
+        // Git tree format: "<mode> <name>\0<hash as raw bytes>"
+        tree_content += to_string(mode) + " " + name + "\0" + hash;
+    }
+
+    return tree_content;
+}
+
+
+Tree* build_tree(fs::path dir_path){
+    Tree* result = new Tree();
+
+    for (const auto& entry : fs::directory_iterator(dir_path)) {
+        if(entry.is_regular_file()){
+            Blob* blob = new Blob();
+            string content = make_blob_content(entry.path());
+            blob->content = content;
+            string hash = sha1(content);
+            result->add_entries(100644, entry.path().filename().string(), blob, hash);
+        } else if(entry.is_directory()){
+            Tree* sub_tree = build_tree(entry.path());
+            string tree_content = make_tree_content(entry.path());
+            string hash = sha1(tree_content);
+            result->add_entries(40000, entry.path().filename().string(), sub_tree, hash);
+        }
+    }
+
+    return result;
 }
 
 void create_file(fs::path p , string content){
