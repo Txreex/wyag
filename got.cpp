@@ -23,8 +23,11 @@ class Blob;
 class TreeEntry;
 class Tree;
 Tree* build_tree(fs::path);
+Tree* build_file_tree(fs::path);
 void create_file(fs::path, string content = "");
 // ---------------------------------------------------------------------------------
+
+
 
 
 
@@ -107,6 +110,7 @@ std::string sha1(const std::string& input) {
 
 
 
+
 // ------------------------------------TREE-----------------------------------------
 
 class Object{
@@ -167,12 +171,15 @@ void print_tree(Tree* tree, string indent = ""){
 
 
 
+
+
 // ------------------------------------GitRepository--------------------------------
 
 class GitRepository {
 public:
     fs::path worktree;
     fs::path gitdir;
+    int is_repo = false;
 
     void init() {
         this->worktree = fs::current_path();
@@ -182,42 +189,53 @@ public:
             throw runtime_error("Already a git repository");
         }else{
             create_structure(this);
+            is_repo = true;
         }
     }
 
-    void add(fs::path p) {
-        if(fs::is_regular_file(p)){
-            //
+    void add(fs::path p = fs::current_path()) {
+        fs::path gitdir = fs::current_path() / ".git";
+        if(!fs::exists(gitdir)) {
+            throw runtime_error("you need to initialize the repository first");
         }
+        Tree* result = build_file_tree(p);
+        print_tree(result);
     }
 };
 
 // ---------------------------------------------------------------------------------
 
+
+
+
+
 // ------------------------------------MAIN-----------------------------------------
 
 int main(int argc , char** argv){
-    // GitRepository repo;
-    // unordered_map<string , function<void()>> commands = {
-    //     {"init" , [&](){repo.init();}}
-    // };
+    GitRepository repo;
+    unordered_map<string , function<void()>> commands = {
+        {"init" , [&](){repo.init();}},
+        {"add" , [&](){repo.add();}}
+    };
 
-    // if(argc > 1){
-    //     string command = argv[1];
-    //     if(commands.find(command) != commands.end()){
-    //         commands[command]();
-    //     }else{
-    //         cout<<command<<" not found";
-    //     }
-    // }else{
-    //     cout<<"No command given";
-    // }
-    Tree* cur_tree = build_tree(fs::current_path());
-    print_tree(cur_tree);
+    if(argc > 1){
+        string command = argv[1];
+        if(commands.find(command) != commands.end()){
+            commands[command]();
+        }else{
+            cout<<command<<" not found";
+        }
+    }else{
+        cout<<"No command given";
+    }
 
     return 0;
 }
 // ---------------------------------------------------------------------------------
+
+
+
+
 
 // ---------------------------------UTILITIES---------------------------------------
 
@@ -274,7 +292,7 @@ string make_tree_content(fs::path dir_path) {
         string hash = sha1(entry_content);
 
         // Git tree format: "<mode> <name>\0<hash as raw bytes>"
-        tree_content += to_string(mode) + " " + name + "\0" + hash;
+        tree_content += to_string(mode) + " " + name + "\0" + hash +"\n";
     }
 
     return tree_content;
@@ -285,6 +303,10 @@ Tree* build_tree(fs::path dir_path){
     Tree* result = new Tree();
 
     for (const auto& entry : fs::directory_iterator(dir_path)) {
+        if (entry.path().filename() == ".git") {
+            continue;
+        }
+
         if(entry.is_regular_file()){
             Blob* blob = new Blob();
             string content = make_blob_content(entry.path());
@@ -296,6 +318,54 @@ Tree* build_tree(fs::path dir_path){
             string tree_content = make_tree_content(entry.path());
             string hash = sha1(tree_content);
             result->add_entries(40000, entry.path().filename().string(), sub_tree, hash);
+        }
+    }
+
+    return result;
+}
+
+Tree* build_file_tree(fs::path dir_path){
+    Tree* result = new Tree();
+
+    for (const auto& entry : fs::directory_iterator(dir_path)) {
+        if (entry.path().filename() == ".git") {
+            continue;
+        }
+
+        if(entry.is_regular_file()){
+            Blob* blob = new Blob();
+            string content = make_blob_content(entry.path());
+            blob->content = content;
+            string hash = sha1(content);
+            result->add_entries(100644, entry.path().filename().string(), blob, hash);
+
+            fs::path file_folder_path = fs::current_path()/".git"/"objects"/hash.substr(0,2);
+            fs::path file_path = file_folder_path/hash.substr(2);
+
+            fs::create_directories(file_folder_path);
+            ofstream out(file_path);
+            if(!out){
+                throw runtime_error("Failed to create a file");
+            }else{
+                out<<content;
+            }
+
+        } else if(entry.is_directory()){
+            Tree* sub_tree = build_file_tree(entry.path());
+            string tree_content = make_tree_content(entry.path());
+            string hash = sha1(tree_content);
+            result->add_entries(40000, entry.path().filename().string(), sub_tree, hash);
+
+            fs::path file_folder_path = fs::current_path()/".git"/"objects"/hash.substr(0,2);
+            fs::path file_path = file_folder_path/hash.substr(2);
+
+            fs::create_directories(file_folder_path);
+            ofstream out(file_path);
+            if(!out){
+                throw runtime_error("Failed to create a file");
+            }else{
+                out<<tree_content;
+            }
         }
     }
 
