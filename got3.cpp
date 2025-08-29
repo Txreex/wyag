@@ -14,24 +14,24 @@ namespace fs = std::filesystem;
 
 
 // ---------------------------FORWARD DECLARATIONS----------------------------------
-class GitRepository;
-void create_structure(GitRepository *repo);
-string make_blob_content(fs::path);
-string make_tree_content(fs::path);
 class Object;
 class Blob;
 class TreeEntry;
 class Tree;
+class GitRepository;
+
+void create_structure(GitRepository *repo);
+string make_blob_content(fs::path);
+string make_tree_content(fs::path);
 void write_object(TreeEntry* entry);
+Blob* write_blob_only(TreeEntry* entry); 
 Tree* build_tree(fs::path);
 Tree* build_tree_with_root(fs::path);
 Tree* build_file_tree(fs::path , int mode = 0);
+Tree* build_blobs_only(fs::path);
+void stage_file(fs::path file_path);
 TreeEntry* make_blob(fs::path);
 void create_file(fs::path, string content = "");
-// ---------------------------------------------------------------------------------
-
-
-
 
 
 // ---------------------------SHA1 IMPLIMENTATION-----------------------------------
@@ -110,10 +110,6 @@ std::string sha1(const std::string& input) {
 }
 // ---------------------------------------------------------------------------------
 
-
-
-
-
 // ------------------------------------TREE-----------------------------------------
 
 class Object{
@@ -137,8 +133,8 @@ public :
 
     TreeEntry(int mode , string name , Object* hash , string sha = ""){
         this->sha = sha;
-        (*this).mode = mode;
-        (*this).name = name;
+        this->mode = mode;
+        this->name = name;
         this->hash = hash;
     }
 };
@@ -176,8 +172,35 @@ void print_tree(Tree* tree, string indent = ""){
 
 // ---------------------------------------------------------------------------------
 
+// ---------------------------STAGING AREA------------------------------------------
+unordered_map<string, TreeEntry*> staging_area;
 
+// function to load index file
+void load_index() {
+    staging_area.clear();
+    ifstream indexFile(".git/index");
+    string line;
 
+    while (getline(indexFile, line)) {
+        istringstream iss(line);
+        int mode;
+        string sha, path;
+        iss >> mode >> sha >> path;
+
+        Blob* blob = new Blob(); 
+        blob->content = ""; 
+        staging_area[path] = new TreeEntry(mode, path, blob, sha);
+    }
+}
+
+void save_index() {
+    std::ofstream indexFile(".git/index", std::ios::trunc); // overwrite
+    for (auto& [path, entry] : staging_area) {
+        indexFile << entry->mode << " " << path << " " << entry->sha << "\n";
+    }
+    indexFile.close();
+}
+// ---------------------------------------------------------------------------------
 
 
 // ------------------------------------GitRepository--------------------------------
@@ -201,21 +224,22 @@ public:
     }
 
     void add(fs::path p = fs::current_path()) {
-        fs::path gitdir = fs::current_path() / ".git";
-        if(!fs::exists(gitdir)) {
-            throw runtime_error("you need to initialize the repository first");
-        }
         if(p == "."){
-            Tree* result = build_file_tree(p);
-            print_tree(result);
-        }else if(fs::is_regular_file(p)){
-            TreeEntry* entry = make_blob(p);
-            write_object(entry);
-        }else if(fs::is_directory(p)){
-            Tree* result = build_file_tree(p , 1);
-            print_tree(result);
-        }else{
-            throw runtime_error("NOT A VALID COMMAND ");
+            for (const auto& entry : fs::recursive_directory_iterator(fs::current_path())) {
+                if(entry.path().filename().string()[0] == '.') continue;
+                if (entry.is_regular_file()){
+                    stage_file(entry.path());
+                }     
+            }
+        }else if (fs::is_regular_file(p)) {
+            stage_file(p);
+        } else if (fs::is_directory(p)) {
+            for (const auto& entry : fs::recursive_directory_iterator(p)) {
+                if(entry.path().filename().string()[0] == '.') continue;
+                if (entry.is_regular_file()) stage_file(entry.path());
+            }
+        } else {
+            throw std::runtime_error("Invalid path for add: " + p.string());
         }
     }
 };
@@ -223,12 +247,14 @@ public:
 // ---------------------------------------------------------------------------------
 
 
-
-
-
 // ------------------------------------MAIN-----------------------------------------
 
 int main(int argc , char** argv){
+    
+    if(fs::exists(".git/index")){
+        load_index();
+    }
+
     GitRepository repo;
     unordered_map<string , function<void()>> commands = {
         {"init" , [&](){repo.init();}},
@@ -256,9 +282,6 @@ int main(int argc , char** argv){
     return 0;
 }
 // ---------------------------------------------------------------------------------
-
-
-
 
 
 // ---------------------------------UTILITIES---------------------------------------
@@ -326,29 +349,50 @@ string make_tree_content(fs::path dir_path) {
 Tree* build_tree(fs::path dir_path) {
     // build a tree for the children inside dir_path
     Tree* result = new Tree();
+    
+    if(fs::is_directory(dir_path)){
+        for (const auto& entry : fs::directory_iterator(dir_path)) {
+            if (entry.path().filename() == ".git") {
+                continue;
+            }
 
-    for (const auto& entry : fs::directory_iterator(dir_path)) {
-        if (entry.path().filename() == ".git") {
-            continue;
+            if (entry.is_regular_file()) {
+                Blob* blob = new Blob();
+                string content = make_blob_content(entry.path());
+                blob->content = content;
+                string hash = sha1(content);
+                result->add_entries(100644, entry.path().filename().string(), blob, hash);
+            } else if (entry.is_directory()) {
+                Tree* sub_tree = build_tree(entry.path());
+                string tree_content = make_tree_content(entry.path());
+                sub_tree->content = tree_content;
+                string hash = sha1(tree_content);
+                result->add_entries(40000, entry.path().filename().string(), sub_tree, hash);
+            }
         }
-
-        if (entry.is_regular_file()) {
-            Blob* blob = new Blob();
-            string content = make_blob_content(entry.path());
-            blob->content = content;
-            string hash = sha1(content);
-            result->add_entries(100644, entry.path().filename().string(), blob, hash);
-        } else if (entry.is_directory()) {
-            Tree* sub_tree = build_tree(entry.path());
-            string tree_content = make_tree_content(entry.path());
-            sub_tree->content = tree_content;
-            string hash = sha1(tree_content);
-            result->add_entries(40000, entry.path().filename().string(), sub_tree, hash);
-        }
+    }else if(fs::is_regular_file(dir_path)){
+        Blob* blob = new Blob();
+        string content = make_blob_content(dir_path);
+        blob->content = content;
+        string hash = sha1(content);
+        result->add_entries(100644, dir_path.filename().string(), blob, hash);
     }
 
     return result;
 }
+
+void stage_file(fs::path file_path) {
+    if (file_path.string().find(".git") != string::npos) return;
+
+    TreeEntry* entry = make_blob(file_path);
+    write_blob_only(entry);
+
+    staging_area[file_path.string()] = entry; // add or overwrite in-memory
+    
+    //append to .git/index immediately
+    save_index();
+}
+
 
 TreeEntry* make_blob(fs::path p){
     Blob* blob = new Blob();
@@ -372,76 +416,15 @@ Tree* build_tree_with_root(fs::path dir_path) {
     return root_tree;
 }
 
-Tree* build_file_tree(fs::path dir_path , int mode){
-    Tree* empty_tree;
-    if(mode == 0){
-        Tree* root_tree = build_tree_with_root(dir_path);
-        for(auto &entry : root_tree->entries){
-            write_object(entry);
-        }
-        return root_tree;
-    }else if(mode == 1){
-        Tree* tree = build_tree(dir_path);
-        for(auto &entry : tree->entries){
-            write_object(entry);
-        }
-        return tree;
+Tree* build_blobs_only(fs::path p){
+    Tree* result = build_tree(p);
+    for(auto & entry : result->entries){
+        write_blob_only(entry);
     }
-    return empty_tree;
+    return result;
 }
 
-// Tree* build_file_tree(fs::path dir_path) {
-//     Tree* result = new Tree();
-
-//     for (const auto& entry : fs::directory_iterator(dir_path)) {
-//         if (entry.path().filename() == ".git") {
-//             continue;
-//         }
-
-//         if (entry.is_regular_file()) {
-//             Blob* blob = new Blob();
-//             string content = make_blob_content(entry.path());
-//             blob->content = content;
-//             string hash = sha1(content);
-
-//             // write blob to objects
-//             string object_path = ".git/objects/" + hash;
-//             ofstream obj_file(object_path, ios::binary);
-//             obj_file << content;
-//             obj_file.close();
-
-//             result->add_entries(100644, entry.path().filename().string(), blob, hash);
-//         } 
-//         else if (entry.is_directory()) {
-//             Tree* sub_tree = build_file_tree(entry.path());
-//             string tree_content = make_tree_content(entry.path());
-//             string hash = sha1(tree_content);
-
-//             // write subtree to objects
-//             string object_path = ".git/objects/" + hash;
-//             ofstream obj_file(object_path, ios::binary);
-//             obj_file << tree_content;
-//             obj_file.close();
-
-//             result->add_entries(40000, entry.path().filename().string(), sub_tree, hash);
-//         }
-//     }
-
-//     string root_tree_content = make_tree_content(dir_path);
-//     string hash = sha1(root_tree_content);
-
-//     string object_path = ".git/objects/" + hash;
-//     ofstream obj_file(object_path, ios::binary);
-//     obj_file << root_tree_content;
-//     obj_file.close();
-
-//     Tree* root_tree = new Tree();
-//     root_tree->add_entries(40000, dir_path.filename().string(), result, hash);
-
-//     return root_tree;
-// }
-
-void write_blob_only(TreeEntry* entry){
+Blob* write_blob_only(TreeEntry* entry){
     Blob* blob = dynamic_cast<Blob*>(entry->hash);
     if(blob){
         string hash = entry->sha;
@@ -461,6 +444,7 @@ void write_blob_only(TreeEntry* entry){
             throw runtime_error("Not a valid type ");
         }
     }
+    return blob;
 }
 
 void write_object(TreeEntry* entry){
